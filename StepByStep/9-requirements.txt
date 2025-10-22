@@ -1,0 +1,58 @@
+9)Τώρα ας δημιουργήσουμε ένα requirements.txt για τα Python dependencies:
+---
+# ===================================================
+# Smart City IMS - Python Dependencies
+# ===================================================
+
+# Core Data Processing
+pyspark==3.5.0
+pandas==2.1.3
+numpy==1.26.2
+
+# Kafka Integration
+kafka-python==2.0.2
+confluent-kafka==2.3.0
+
+# Blockchain
+web3==6.11.3
+eth-account==0.10.0
+py-solc-x==2.0.2
+
+# Database
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+
+# Redis
+redis==5.0.1
+hiredis==2.2.3
+
+# API & Web
+requests==2.31.0
+flask==3.0.0
+flask-cors==4.0.0
+
+# Monitoring & Logging
+prometheus-client==0.19.0
+python-json-logger==2.0.7
+
+# Azure SDK
+azure-identity==1.15.0
+azure-storage-blob==12.19.0
+azure-keyvault-secrets==4.7.0
+azure-monitor-opentelemetry==1.1.0
+
+# Utilities
+python-dotenv==1.0.0
+pyyaml==6.0.1
+pytz==2023.3.post1
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+
+# Development
+black==23.12.0
+flake8==6.1.0
+mypy==1.7.1
+---

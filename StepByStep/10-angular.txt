@@ -1,0 +1,568 @@
+// ===================================================
+// dashboard.component.ts
+// ===================================================
+import { Component, OnInit, OnDestroy } from '@angular/core';
+import { interval, Subscription } from 'rxjs';
+import { SensorService } from '../services/sensor.service';
+import { AlertService } from '../services/alert.service';
+import { SensorReading, Alert } from '../models/types';
+
+@Component({
+  selector: 'app-dashboard',
+  templateUrl: './dashboard.component.html',
+  styleUrls: ['./dashboard.component.scss']
+})
+export class DashboardComponent implements OnInit, OnDestroy {
+  
+  latestReadings: Map<string, SensorReading> = new Map();
+  activeAlerts: Alert[] = [];
+  recentAnomalies: SensorReading[] = [];
+  cityStatistics: any = {};
+  
+  loading = true;
+  refreshInterval = 5000; // 5 seconds
+  private subscriptions: Subscription = new Subscription();
+  
+  // Chart data
+  temperatureData: any[] = [];
+  airQualityData: any[] = [];
+  
+  constructor(
+    private sensorService: SensorService,
+    private alertService: AlertService
+  ) {}
+  
+  ngOnInit(): void {
+    this.loadDashboardData();
+    this.startAutoRefresh();
+  }
+  
+  ngOnDestroy(): void {
+    this.subscriptions.unsubscribe();
+  }
+  
+  loadDashboardData(): void {
+    this.loading = true;
+    
+    // Load latest readings
+    this.subscriptions.add(
+      this.sensorService.getLatestReadings().subscribe({
+        next: (data) => {
+          this.latestReadings = new Map(Object.entries(data));
+          this.loading = false;
+        },
+        error: (error) => {
+          console.error('Error loading city statistics:', error);
+        }
+      })
+    );
+  }
+  
+  processCityStatistics(readings: SensorReading[]): void {
+    const grouped = readings.reduce((acc, reading) => {
+      if (!acc[reading.sensorType]) {
+        acc[reading.sensorType] = [];
+      }
+      acc[reading.sensorType].push(reading.value);
+      return acc;
+    }, {} as any);
+    
+    this.cityStatistics = Object.keys(grouped).map(type => ({
+      sensorType: type,
+      avg: this.average(grouped[type]),
+      min: Math.min(...grouped[type]),
+      max: Math.max(...grouped[type]),
+      count: grouped[type].length
+    }));
+    
+    // Prepare chart data
+    this.prepareChartData(readings);
+  }
+  
+  prepareChartData(readings: SensorReading[]): void {
+    const tempReadings = readings.filter(r => r.sensorType === 'temperature');
+    const aqiReadings = readings.filter(r => r.sensorType === 'air_quality');
+    
+    this.temperatureData = tempReadings.map(r => ({
+      name: new Date(r.timestamp).toLocaleTimeString(),
+      value: r.value
+    }));
+    
+    this.airQualityData = aqiReadings.map(r => ({
+      name: new Date(r.timestamp).toLocaleTimeString(),
+      value: r.value
+    }));
+  }
+  
+  startAutoRefresh(): void {
+    const refresh$ = interval(this.refreshInterval).subscribe(() => {
+      this.loadDashboardData();
+    });
+    
+    this.subscriptions.add(refresh$);
+  }
+  
+  acknowledgeAlert(alertId: number): void {
+    this.alertService.acknowledgeAlert(alertId, 'current-user').subscribe({
+      next: () => {
+        console.log('Alert acknowledged');
+        this.loadDashboardData();
+      },
+      error: (error) => {
+        console.error('Error acknowledging alert:', error);
+      }
+    });
+  }
+  
+  resolveAlert(alertId: number): void {
+    this.alertService.resolveAlert(alertId).subscribe({
+      next: () => {
+        console.log('Alert resolved');
+        this.loadDashboardData();
+      },
+      error: (error) => {
+        console.error('Error resolving alert:', error);
+      }
+    });
+  }
+  
+  getSeverityClass(severity: string): string {
+    const classes: any = {
+      'critical': 'severity-critical',
+      'high': 'severity-high',
+      'medium': 'severity-medium',
+      'low': 'severity-low'
+    };
+    return classes[severity] || 'severity-low';
+  }
+  
+  private average(arr: number[]): number {
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
+  }
+}
+
+// ===================================================
+// sensor.service.ts
+// ===================================================
+import { Injectable } from '@angular/core';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
+import { SensorReading } from '../models/types';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class SensorService {
+  private apiUrl = `${environment.apiUrl}/api/v1/readings`;
+  
+  constructor(private http: HttpClient) {}
+  
+  getLatestReadings(): Observable<{[key: string]: number}> {
+    return this.http.get<{[key: string]: number}>(`${this.apiUrl}/latest`);
+  }
+  
+  getReadingsBySensor(sensorId: string): Observable<SensorReading[]> {
+    return this.http.get<SensorReading[]>(`${this.apiUrl}/sensor/${sensorId}`);
+  }
+  
+  getReadingsByType(
+    sensorType: string, 
+    start: Date, 
+    end: Date
+  ): Observable<SensorReading[]> {
+    const params = new HttpParams()
+      .set('start', start.toISOString())
+      .set('end', end.toISOString());
+    
+    return this.http.get<SensorReading[]>(
+      `${this.apiUrl}/type/${sensorType}`, 
+      { params }
+    );
+  }
+  
+  getRecentAnomalies(hours: number): Observable<SensorReading[]> {
+    const params = new HttpParams().set('hours', hours.toString());
+    return this.http.get<SensorReading[]>(`${this.apiUrl}/anomalies`, { params });
+  }
+  
+  getCityReadings(city: string, hours: number): Observable<SensorReading[]> {
+    const params = new HttpParams().set('hours', hours.toString());
+    return this.http.get<SensorReading[]>(`${this.apiUrl}/city/${city}`, { params });
+  }
+}
+
+// ===================================================
+// alert.service.ts
+// ===================================================
+import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../environments/environment';
+import { Alert } from '../models/types';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class AlertService {
+  private apiUrl = `${environment.apiUrl}/api/v1/alerts`;
+  
+  constructor(private http: HttpClient) {}
+  
+  getActiveAlerts(): Observable<Alert[]> {
+    return this.http.get<Alert[]>(`${this.apiUrl}/active`);
+  }
+  
+  getAlertsBySensor(sensorId: string): Observable<Alert[]> {
+    return this.http.get<Alert[]>(`${this.apiUrl}/sensor/${sensorId}`);
+  }
+  
+  getCriticalAlerts(): Observable<Alert[]> {
+    return this.http.get<Alert[]>(`${this.apiUrl}/critical`);
+  }
+  
+  getAlertCount(): Observable<{activeAlerts: number}> {
+    return this.http.get<{activeAlerts: number}>(`${this.apiUrl}/count`);
+  }
+  
+  acknowledgeAlert(alertId: number, acknowledgedBy: string): Observable<Alert> {
+    return this.http.put<Alert>(
+      `${this.apiUrl}/${alertId}/acknowledge`,
+      { acknowledgedBy }
+    );
+  }
+  
+  resolveAlert(alertId: number): Observable<Alert> {
+    return this.http.put<Alert>(`${this.apiUrl}/${alertId}/resolve`, {});
+  }
+}
+
+// ===================================================
+// types.ts (Models)
+// ===================================================
+export interface SensorReading {
+  readingId: number;
+  sensorId: string;
+  timestamp: string;
+  sensorType: string;
+  value: number;
+  unit: string;
+  isAnomaly: boolean;
+  city: string;
+}
+
+export interface Alert {
+  alertId: number;
+  sensorId: string;
+  alertType: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  message: string;
+  actualValue: number;
+  triggeredAt: string;
+  acknowledged: boolean;
+  resolved: boolean;
+}
+
+// ===================================================
+// dashboard.component.html
+// ===================================================
+/*
+<div class="dashboard-container">
+  <!-- Header -->
+  <header class="dashboard-header">
+    <h1>Smart City Management System</h1>
+    <div class="header-stats">
+      <div class="stat-card">
+        <span class="stat-label">Active Alerts</span>
+        <span class="stat-value">{{ activeAlerts.length }}</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Anomalies (24h)</span>
+        <span class="stat-value">{{ recentAnomalies.length }}</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Loading Spinner -->
+  <div *ngIf="loading" class="loading-spinner">
+    <mat-spinner></mat-spinner>
+  </div>
+
+  <!-- Main Content -->
+  <div class="dashboard-content" *ngIf="!loading">
+    
+    <!-- Latest Readings -->
+    <section class="latest-readings">
+      <h2>Latest Sensor Readings</h2>
+      <div class="readings-grid">
+        <div *ngFor="let reading of latestReadings | keyvalue" class="reading-card">
+          <h3>{{ reading.key }}</h3>
+          <p class="reading-value">{{ reading.value | number:'1.2-2' }}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="charts-section">
+      <div class="chart-container">
+        <h2>Temperature Trends</h2>
+        <ngx-charts-line-chart
+          [results]="[{name: 'Temperature', series: temperatureData}]"
+          [xAxis]="true"
+          [yAxis]="true"
+          [legend]="true">
+        </ngx-charts-line-chart>
+      </div>
+      
+      <div class="chart-container">
+        <h2>Air Quality Index</h2>
+        <ngx-charts-line-chart
+          [results]="[{name: 'AQI', series: airQualityData}]"
+          [xAxis]="true"
+          [yAxis]="true"
+          [legend]="true">
+        </ngx-charts-line-chart>
+      </div>
+    </section>
+
+    <!-- Active Alerts -->
+    <section class="alerts-section">
+      <h2>Active Alerts</h2>
+      <div class="alerts-list">
+        <div *ngFor="let alert of activeAlerts" 
+             class="alert-card"
+             [ngClass]="getSeverityClass(alert.severity)">
+          <div class="alert-header">
+            <span class="alert-sensor">{{ alert.sensorId }}</span>
+            <span class="alert-severity">{{ alert.severity }}</span>
+          </div>
+          <p class="alert-message">{{ alert.message }}</p>
+          <div class="alert-actions">
+            <button (click)="acknowledgeAlert(alert.alertId)" 
+                    [disabled]="alert.acknowledged">
+              Acknowledge
+            </button>
+            <button (click)="resolveAlert(alert.alertId)">
+              Resolve
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- City Statistics -->
+    <section class="statistics-section">
+      <h2>City Statistics (24h)</h2>
+      <table class="stats-table">
+        <thead>
+          <tr>
+            <th>Sensor Type</th>
+            <th>Average</th>
+            <th>Min</th>
+            <th>Max</th>
+            <th>Readings</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let stat of cityStatistics">
+            <td>{{ stat.sensorType }}</td>
+            <td>{{ stat.avg | number:'1.2-2' }}</td>
+            <td>{{ stat.min | number:'1.2-2' }}</td>
+            <td>{{ stat.max | number:'1.2-2' }}</td>
+            <td>{{ stat.count }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+</div>
+*/
+
+// ===================================================
+// dashboard.component.scss
+// ===================================================
+/*
+.dashboard-container {
+  padding: 20px;
+  background: #f5f5f5;
+  min-height: 100vh;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.header-stats {
+  display: flex;
+  gap: 20px;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 20px;
+  background: #f0f0f0;
+  border-radius: 8px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #666;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
+}
+
+.readings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 30px;
+}
+
+.reading-card {
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.reading-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: #2196F3;
+}
+
+.charts-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+.chart-container {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.alert-card {
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  border-left: 4px solid #ccc;
+}
+
+.severity-critical {
+  border-left-color: #f44336;
+}
+
+.severity-high {
+  border-left-color: #ff9800;
+}
+
+.severity-medium {
+  border-left-color: #ffc107;
+}
+
+.severity-low {
+  border-left-color: #4caf50;
+}
+
+.alert-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.alert-actions button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #2196F3;
+  color: white;
+}
+
+.alert-actions button:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.stats-table {
+  width: 100%;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.stats-table th {
+  background: #f5f5f5;
+  padding: 12px;
+  text-align: left;
+}
+
+.stats-table td {
+  padding: 12px;
+  border-top: 1px solid #eee;
+}
+*/ (error) => {
+          console.error('Error loading readings:', error);
+          this.loading = false;
+        }
+      })
+    );
+    
+    // Load active alerts
+    this.subscriptions.add(
+      this.alertService.getActiveAlerts().subscribe({
+        next: (alerts) => {
+          this.activeAlerts = alerts;
+        },
+        error: (error) => {
+          console.error('Error loading alerts:', error);
+        }
+      })
+    );
+    
+    // Load recent anomalies
+    this.subscriptions.add(
+      this.sensorService.getRecentAnomalies(24).subscribe({
+        next: (anomalies) => {
+          this.recentAnomalies = anomalies;
+        },
+        error: (error) => {
+          console.error('Error loading anomalies:', error);
+        }
+      })
+    );
+    
+    // Load city statistics
+    this.loadCityStatistics();
+  }
+  
+  loadCityStatistics(): void {
+    this.subscriptions.add(
+      this.sensorService.getCityReadings('Thessaloniki', 24).subscribe({
+        next: (readings) => {
+          this.processCityStatistics(readings);
+        },
+        error:

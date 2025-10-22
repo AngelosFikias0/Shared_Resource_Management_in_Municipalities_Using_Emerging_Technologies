@@ -1,0 +1,587 @@
+6)Τώρα ας δημιουργήσουμε το Spring Boot Backend με REST APIs:
+---
+// ===================================================
+// Main Application Class
+// ===================================================
+package com.smartcity.ims;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
+
+@SpringBootApplication
+@EnableCaching
+@EnableScheduling
+@EnableJpaAuditing
+public class SmartCityImsApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(SmartCityImsApplication.class, args);
+    }
+}
+
+// ===================================================
+// Entity: SensorReading
+// ===================================================
+package com.smartcity.ims.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "sensor_readings")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class SensorReading {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long readingId;
+    
+    @Column(nullable = false)
+    private String sensorId;
+    
+    @Column(nullable = false)
+    private LocalDateTime timestamp;
+    
+    @Column(nullable = false)
+    private String sensorType;
+    
+    @Column(nullable = false)
+    private Double value;
+    
+    private String unit;
+    
+    @Column(name = "is_anomaly")
+    private Boolean isAnomaly = false;
+    
+    private Double locationLat;
+    
+    private Double locationLon;
+    
+    private String city;
+    
+    @Column(name = "processed")
+    private Boolean processed = false;
+    
+    @Column(name = "created_at")
+    private LocalDateTime createdAt = LocalDateTime.now();
+}
+
+// ===================================================
+// Entity: Alert
+// ===================================================
+package com.smartcity.ims.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "alerts")
+@Data
+public class Alert {
+    
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long alertId;
+    
+    @Column(nullable = false)
+    private String sensorId;
+    
+    @Column(nullable = false)
+    private String alertType;
+    
+    @Column(nullable = false)
+    private String severity;
+    
+    private String message;
+    
+    private Double thresholdValue;
+    
+    private Double actualValue;
+    
+    @Column(nullable = false)
+    private LocalDateTime triggeredAt;
+    
+    private Boolean acknowledged = false;
+    
+    private String acknowledgedBy;
+    
+    private LocalDateTime acknowledgedAt;
+    
+    private Boolean resolved = false;
+    
+    private LocalDateTime resolvedAt;
+    
+    private LocalDateTime createdAt = LocalDateTime.now();
+}
+
+// ===================================================
+// Repository: SensorReadingRepository
+// ===================================================
+package com.smartcity.ims.repository;
+
+import com.smartcity.ims.model.SensorReading;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Repository
+public interface SensorReadingRepository extends JpaRepository<SensorReading, Long> {
+    
+    List<SensorReading> findBySensorIdOrderByTimestampDesc(String sensorId);
+    
+    List<SensorReading> findBySensorTypeAndTimestampBetween(
+        String sensorType, 
+        LocalDateTime start, 
+        LocalDateTime end
+    );
+    
+    @Query("SELECT sr FROM SensorReading sr WHERE sr.isAnomaly = true " +
+           "AND sr.timestamp > :since ORDER BY sr.timestamp DESC")
+    List<SensorReading> findRecentAnomalies(@Param("since") LocalDateTime since);
+    
+    @Query("SELECT DISTINCT sr.sensorId FROM SensorReading sr")
+    List<String> findAllSensorIds();
+    
+    @Query("SELECT sr FROM SensorReading sr WHERE sr.city = :city " +
+           "AND sr.timestamp > :since ORDER BY sr.timestamp DESC")
+    List<SensorReading> findRecentByCityReadings(
+        @Param("city") String city, 
+        @Param("since") LocalDateTime since
+    );
+}
+
+// ===================================================
+// Repository: AlertRepository
+// ===================================================
+package com.smartcity.ims.repository;
+
+import com.smartcity.ims.model.Alert;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Repository
+public interface AlertRepository extends JpaRepository<Alert, Long> {
+    
+    List<Alert> findByResolvedFalseOrderByTriggeredAtDesc();
+    
+    List<Alert> findBySensorIdAndResolvedFalse(String sensorId);
+    
+    @Query("SELECT a FROM Alert a WHERE a.severity IN :severities " +
+           "AND a.resolved = false ORDER BY a.triggeredAt DESC")
+    List<Alert> findBySeveritiesAndUnresolved(List<String> severities);
+    
+    Long countByResolvedFalse();
+}
+
+// ===================================================
+// DTO: SensorReadingDTO
+// ===================================================
+package com.smartcity.ims.dto;
+
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Data
+public class SensorReadingDTO {
+    private Long readingId;
+    private String sensorId;
+    private LocalDateTime timestamp;
+    private String sensorType;
+    private Double value;
+    private String unit;
+    private Boolean isAnomaly;
+    private String city;
+}
+
+// ===================================================
+// DTO: AlertDTO
+// ===================================================
+package com.smartcity.ims.dto;
+
+import lombok.Data;
+import java.time.LocalDateTime;
+
+@Data
+public class AlertDTO {
+    private Long alertId;
+    private String sensorId;
+    private String alertType;
+    private String severity;
+    private String message;
+    private Double actualValue;
+    private LocalDateTime triggeredAt;
+    private Boolean acknowledged;
+    private Boolean resolved;
+}
+
+// ===================================================
+// Service: SensorReadingService
+// ===================================================
+package com.smartcity.ims.service;
+
+import com.smartcity.ims.model.SensorReading;
+import com.smartcity.ims.repository.SensorReadingRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class SensorReadingService {
+    
+    private final SensorReadingRepository readingRepository;
+    
+    @Transactional(readOnly = true)
+    @Cacheable(value = "sensorReadings", key = "#sensorId")
+    public List<SensorReading> getReadingsBySensor(String sensorId) {
+        log.info("Fetching readings for sensor: {}", sensorId);
+        return readingRepository.findBySensorIdOrderByTimestampDesc(sensorId);
+    }
+    
+    @Transactional(readOnly = true)
+    public List<SensorReading> getReadingsByTypeAndTimeRange(
+            String sensorType, 
+            LocalDateTime start, 
+            LocalDateTime end) {
+        return readingRepository.findBySensorTypeAndTimestampBetween(
+            sensorType, start, end
+        );
+    }
+    
+    @Transactional(readOnly = true)
+    @Cacheable(value = "recentAnomalies", key = "#hours")
+    public List<SensorReading> getRecentAnomalies(int hours) {
+        LocalDateTime since = LocalDateTime.now().minusHours(hours);
+        return readingRepository.findRecentAnomalies(since);
+    }
+    
+    @Transactional(readOnly = true)
+    public Map<String, Double> getLatestReadingsBySensorType() {
+        List<String> sensorIds = readingRepository.findAllSensorIds();
+        
+        return sensorIds.stream()
+            .collect(Collectors.toMap(
+                sensorId -> sensorId,
+                sensorId -> {
+                    List<SensorReading> readings = 
+                        readingRepository.findBySensorIdOrderByTimestampDesc(sensorId);
+                    return readings.isEmpty() ? 0.0 : readings.get(0).getValue();
+                }
+            ));
+    }
+    
+    @Transactional(readOnly = true)
+    public List<SensorReading> getCityReadings(String city, int hours) {
+        LocalDateTime since = LocalDateTime.now().minusHours(hours);
+        return readingRepository.findRecentByCityReadings(city, since);
+    }
+}
+
+// ===================================================
+// Service: AlertService
+// ===================================================
+package com.smartcity.ims.service;
+
+import com.smartcity.ims.model.Alert;
+import com.smartcity.ims.repository.AlertRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class AlertService {
+    
+    private final AlertRepository alertRepository;
+    
+    @Transactional(readOnly = true)
+    @Cacheable(value = "activeAlerts")
+    public List<Alert> getActiveAlerts() {
+        return alertRepository.findByResolvedFalseOrderByTriggeredAtDesc();
+    }
+    
+    @Transactional(readOnly = true)
+    public List<Alert> getAlertsBySensor(String sensorId) {
+        return alertRepository.findBySensorIdAndResolvedFalse(sensorId);
+    }
+    
+    @Transactional(readOnly = true)
+    public List<Alert> getCriticalAlerts() {
+        return alertRepository.findBySeveritiesAndUnresolved(
+            List.of("critical", "high")
+        );
+    }
+    
+    @Transactional(readOnly = true)
+    public Long getActiveAlertCount() {
+        return alertRepository.countByResolvedFalse();
+    }
+    
+    @Transactional
+    @CacheEvict(value = "activeAlerts", allEntries = true)
+    public Alert acknowledgeAlert(Long alertId, String acknowledgedBy) {
+        Alert alert = alertRepository.findById(alertId)
+            .orElseThrow(() -> new RuntimeException("Alert not found"));
+        
+        alert.setAcknowledged(true);
+        alert.setAcknowledgedBy(acknowledgedBy);
+        alert.setAcknowledgedAt(LocalDateTime.now());
+        
+        log.info("Alert {} acknowledged by {}", alertId, acknowledgedBy);
+        return alertRepository.save(alert);
+    }
+    
+    @Transactional
+    @CacheEvict(value = "activeAlerts", allEntries = true)
+    public Alert resolveAlert(Long alertId) {
+        Alert alert = alertRepository.findById(alertId)
+            .orElseThrow(() -> new RuntimeException("Alert not found"));
+        
+        alert.setResolved(true);
+        alert.setResolvedAt(LocalDateTime.now());
+        
+        log.info("Alert {} resolved", alertId);
+        return alertRepository.save(alert);
+    }
+}
+
+// ===================================================
+// Controller: SensorReadingController
+// ===================================================
+package com.smartcity.ims.controller;
+
+import com.smartcity.ims.model.SensorReading;
+import com.smartcity.ims.service.SensorReadingService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/v1/readings")
+@RequiredArgsConstructor
+@CrossOrigin(origins = "*")
+public class SensorReadingController {
+    
+    private final SensorReadingService readingService;
+    
+    @GetMapping("/sensor/{sensorId}")
+    public ResponseEntity<List<SensorReading>> getReadingsBySensor(
+            @PathVariable String sensorId) {
+        return ResponseEntity.ok(readingService.getReadingsBySensor(sensorId));
+    }
+    
+    @GetMapping("/type/{sensorType}")
+    public ResponseEntity<List<SensorReading>> getReadingsByType(
+            @PathVariable String sensorType,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) 
+            LocalDateTime start,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) 
+            LocalDateTime end) {
+        return ResponseEntity.ok(
+            readingService.getReadingsByTypeAndTimeRange(sensorType, start, end)
+        );
+    }
+    
+    @GetMapping("/anomalies")
+    public ResponseEntity<List<SensorReading>> getRecentAnomalies(
+            @RequestParam(defaultValue = "24") int hours) {
+        return ResponseEntity.ok(readingService.getRecentAnomalies(hours));
+    }
+    
+    @GetMapping("/latest")
+    public ResponseEntity<Map<String, Double>> getLatestReadings() {
+        return ResponseEntity.ok(readingService.getLatestReadingsBySensorType());
+    }
+    
+    @GetMapping("/city/{city}")
+    public ResponseEntity<List<SensorReading>> getCityReadings(
+            @PathVariable String city,
+            @RequestParam(defaultValue = "24") int hours) {
+        return ResponseEntity.ok(readingService.getCityReadings(city, hours));
+    }
+}
+
+// ===================================================
+// Controller: AlertController
+// ===================================================
+package com.smartcity.ims.controller;
+
+import com.smartcity.ims.model.Alert;
+import com.smartcity.ims.service.AlertService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/v1/alerts")
+@RequiredArgsConstructor
+@CrossOrigin(origins = "*")
+public class AlertController {
+    
+    private final AlertService alertService;
+    
+    @GetMapping("/active")
+    public ResponseEntity<List<Alert>> getActiveAlerts() {
+        return ResponseEntity.ok(alertService.getActiveAlerts());
+    }
+    
+    @GetMapping("/sensor/{sensorId}")
+    public ResponseEntity<List<Alert>> getAlertsBySensor(
+            @PathVariable String sensorId) {
+        return ResponseEntity.ok(alertService.getAlertsBySensor(sensorId));
+    }
+    
+    @GetMapping("/critical")
+    public ResponseEntity<List<Alert>> getCriticalAlerts() {
+        return ResponseEntity.ok(alertService.getCriticalAlerts());
+    }
+    
+    @GetMapping("/count")
+    public ResponseEntity<Map<String, Long>> getAlertCount() {
+        return ResponseEntity.ok(
+            Map.of("activeAlerts", alertService.getActiveAlertCount())
+        );
+    }
+    
+    @PutMapping("/{alertId}/acknowledge")
+    public ResponseEntity<Alert> acknowledgeAlert(
+            @PathVariable Long alertId,
+            @RequestBody Map<String, String> request) {
+        String acknowledgedBy = request.get("acknowledgedBy");
+        return ResponseEntity.ok(
+            alertService.acknowledgeAlert(alertId, acknowledgedBy)
+        );
+    }
+    
+    @PutMapping("/{alertId}/resolve")
+    public ResponseEntity<Alert> resolveAlert(@PathVariable Long alertId) {
+        return ResponseEntity.ok(alertService.resolveAlert(alertId));
+    }
+}
+
+// ===================================================
+// Configuration: SecurityConfig
+// ===================================================
+package com.smartcity.ims.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+    
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .cors().and()
+            .csrf().disable()
+            .sessionManagement()
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            .and()
+            .authorizeHttpRequests()
+                .requestMatchers("/api/v1/**").permitAll()
+                .requestMatchers("/actuator/**").permitAll()
+                .anyRequest().authenticated();
+        
+        return http.build();
+    }
+    
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(Arrays.asList("*"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(Arrays.asList("*"));
+        configuration.setExposedHeaders(Arrays.asList("Authorization"));
+        
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
+}
+
+// ===================================================
+// Configuration: RedisConfig
+// ===================================================
+package com.smartcity.ims.config;
+
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.RedisCacheConfiguration;
+import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+
+import java.time.Duration;
+
+@Configuration
+@EnableCaching
+public class RedisConfig {
+    
+    @Bean
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(10))
+            .serializeValuesWith(
+                RedisSerializationContext.SerializationPair.fromSerializer(
+                    new GenericJackson2JsonRedisSerializer()
+                )
+            );
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(config)
+            .build();
+    }
+}
+---

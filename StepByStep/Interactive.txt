@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart City IMS - Architecture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 40px;
+            font-size: 1.2em;
+        }
+        
+        .architecture {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+        
+        .layer {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            position: relative;
+        }
+        
+        .layer-title {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 10px;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        
+        .components {
+            flex: 1;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .component {
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+        }
+        
+        .component:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+        
+        .component-icon {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .component-name {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            font-size: 1.1em;
+        }
+        
+        .component-desc {
+            font-size: 0.85em;
+            color: #7f8c8d;
+            line-height: 1.4;
+        }
+        
+        .component-tech {
+            margin-top: 10px;
+            padding: 5px 10px;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 5px;
+            font-size: 0.75em;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .flow-arrow {
+            text-align: center;
+            font-size: 2em;
+            color: #667eea;
+            margin: -10px 0;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 1em;
+            opacity: 0.9;
+        }
+        
+        .legend {
+            margin-top: 40px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+        }
+        
+        .legend-title {
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #2c3e50;
+            font-size: 1.2em;
+        }
+        
+        .legend-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .legend-icon {
+            font-size: 1.5em;
+        }
+        
+        @media (max-width: 768px) {
+            .components {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏙️ Smart City IMS</h1>
+        <p class="subtitle">Integrated Management System - Complete Architecture</p>
+        
+        <div class="architecture">
+            <!-- Layer 1: Data Collection -->
+            <div class="layer">
+                <div class="layer-title">DATA COLLECTION</div>
+                <div class="components">
+                    <div class="component">
+                        <div class="component-icon">📡</div>
+                        <div class="component-name">IoT Sensors</div>
+                        <div class="component-desc">
+                            Temperature, Air Quality, PM2.5, PM10, Noise, CO2, Humidity
+                        </div>
+                        <div class="component-tech">Python Simulator</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🔄</div>
+                        <div class="component-name">Kafka Producer</div>
+                        <div class="component-desc">
+                            Real-time data streaming with kafka-python
+                        </div>
+                        <div class="component-tech">Apache Kafka</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrow">⬇️</div>
+            
+            <!-- Layer 2: Message Broker -->
+            <div class="layer">
+                <div class="layer-title">MESSAGE BROKER</div>
+                <div class="components">
+                    <div class="component">
+                        <div class="component-icon">🚀</div>
+                        <div class="component-name">Apache Kafka</div>
+                        <div class="component-desc">
+                            Low-latency message streaming, 3 partitions, topic: smart-city-sensors
+                        </div>
+                        <div class="component-tech">Confluent 7.5.0</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🐘</div>
+                        <div class="component-name">Zookeeper</div>
+                        <div class="component-desc">
+                            Cluster coordination and configuration management
+                        </div>
+                        <div class="component-tech">ZooKeeper 3.8</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrow">⬇️</div>
+            
+            <!-- Layer 3: Stream Processing -->
+            <div class="layer">
+                <div class="layer-title">STREAM PROCESSING</div>
+                <div class="components">
+                    <div class="component">
+                        <div class="component-icon">⚡</div>
+                        <div class="component-name">PySpark Streaming</div>
+                        <div class="component-desc">
+                            Real-time data processing, anomaly detection, aggregations
+                        </div>
+                        <div class="component-tech">Apache Spark 3.5</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🔍</div>
+                        <div class="component-name">Anomaly Detection</div>
+                        <div class="component-desc">
+                            Statistical analysis with Z-score and threshold checking
+                        </div>
+                        <div class="component-tech">ML Algorithms</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrow">⬇️</div>
+            
+            <!-- Layer 4: Data Storage -->
+            <div class="layer">
+                <div class="layer-title">DATA STORAGE</div>
+                <div class="components">
+                    <div class="component">
+                        <div class="component-icon">🗄️</div>
+                        <div class="component-name">PostgreSQL</div>
+                        <div class="component-desc">
+                            Time-series data with TimescaleDB, ACID transactions
+                        </div>
+                        <div class="component-tech">PostgreSQL 15 + TimescaleDB</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">⚡</div>
+                        <div class="component-name">Redis Cache</div>
+                        <div class="component-desc">
+                            In-memory caching for API responses, &lt;200ms latency
+                        </div>
+                        <div class="component-tech">Redis 7</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">⛓️</div>
+                        <div class="component-name">Blockchain</div>
+                        <div class="component-desc">
+                            Immutable data integrity records with Ethereum
+                        </div>
+                        <div class="component-tech">Web3.py + Ethereum</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrow">⬇️</div>
+            
+            <!-- Layer 5: Application Layer -->
+            <div class="layer">
+                <div class="layer-title">APPLICATION LAYER</div>
+                <div class="components">
+                    <div class="component">
+                        <div class="component-icon">🌱</div>
+                        <div class="component-name">Spring Boot API</div>
+                        <div class="component-desc">
+                            RESTful APIs, JWT auth, role-based access control
+                        </div>
+                        <div class="component-tech">Spring Boot 3.2</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🔐</div>
+                        <div class="component-name">Security Layer</div>
+                        <div class="component-desc">
+                            JWT authentication, Spring Security, HTTPS
+                        </div>
+                        <div class="component-tech">Spring Security</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrow">⬇️</div>
+            
+            <!-- Layer 6: Presentation -->
+            <div class="layer">
+                <div class="layer-title">PRESENTATION</div>
+                <div class="components">
+                    <div class="component">
+                        <div class="component-icon">🎨</div>
+                        <div class="component-name">Angular Dashboard</div>
+                        <div class="component-desc">
+                            Real-time visualization, interactive maps, charts
+                        </div>
+                        <div class="component-tech">Angular 17</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🌐</div>
+                        <div class="component-name">Nginx</div>
+                        <div class="component-desc">
+                            Reverse proxy, load balancing, SSL termination
+                        </div>
+                        <div class="component-tech">Nginx 1.25</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flow-arrow">⬇️</div>
+            
+            <!-- Layer 7: Monitoring -->
+            <div class="layer">
+                <div class="layer-title">MONITORING</div>
+                <div class="components">
+                    <div class="component">
+                        <div class="component-icon">📊</div>
+                        <div class="component-name">Azure Monitor</div>
+                        <div class="component-desc">
+                            Centralized logging, metrics, alerts
+                        </div>
+                        <div class="component-tech">Azure Monitor</div>
+                    </div>
+                    <div class="component">
+                        <div class="component-icon">🔬</div>
+                        <div class="component-name">Application Insights</div>
+                        <div class="component-desc">
+                            APM, performance tracking, distributed tracing
+                        </div>
+                        <div class="component-tech">Azure Insights</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Statistics -->
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value">7</div>
+                <div class="stat-label">Sensor Types</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">&lt;200ms</div>
+                <div class="stat-label">API Latency</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">Real-time</div>
+                <div class="stat-label">Data Processing</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">99.9%</div>
+                <div class="stat-label">Availability SLA</div>
+            </div>
+        </div>
+        
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-title">🔧 Technology Stack</div>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <div class="legend-icon">🐍</div>
+                    <div>Python 3.9+ (Data Processing)</div>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-icon">☕</div>
+                    <div>Java 17 (Backend)</div>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-icon">📱</div>
+                    <div>TypeScript/Angular (Frontend)</div>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-icon">🐳</div>
+                    <div>Docker & Kubernetes</div>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-icon">☁️</div>
+                    <div>Azure Cloud Platform</div>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-icon">🔗</div>
+                    <div>Apache Kafka Streaming</div>
+                </div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 40px; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 12px; text-align: center;">
+            <h3 style="margin-bottom: 10px;">🚀 Production Ready</h3>
+            <p style="opacity: 0.9;">
+                Deployed on Azure Greece Region with disaster recovery in Azure West Europe
+            </p>
+            <p style="margin-top: 10px; font-size: 0.9em; opacity: 0.8;">
+                CI/CD Pipeline • Auto-Scaling • High Availability • 24/7 Monitoring
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // Add click interaction to components
+        document.querySelectorAll('.component').forEach(component => {
+            component.addEventListener('click', function() {
+                const name = this.querySelector('.component-name').textContent;
+                const desc = this.querySelector('.component-desc').textContent;
+                const tech = this.querySelector('.component-tech').textContent;
+                
+                alert(`${name}\n\n${desc}\n\nTechnology: ${tech}`);
+            });
+        });
+        
+        // Add animation on scroll
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        });
+        
+        document.querySelectorAll('.component').forEach(component => {
+            component.style.opacity = '0';
+            component.style.transform = 'translateY(20px)';
+            component.style.transition = 'opacity 0.5s, transform 0.5s';
+            observer.observe(component);
+        });
+    </script>
+</body>
+</html>

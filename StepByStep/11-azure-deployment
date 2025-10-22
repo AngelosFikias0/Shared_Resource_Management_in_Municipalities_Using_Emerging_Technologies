@@ -1,0 +1,417 @@
+# ===================================================
+# Kubernetes Deployment - Spring Boot Backend
+# ===================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smart-city-backend
+  namespace: smart-city
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: smart-city-backend
+  template:
+    metadata:
+      labels:
+        app: smart-city-backend
+    spec:
+      containers:
+      - name: backend
+        image: smartcityacr.azurecr.io/smart-city-backend:latest
+        ports:
+        - containerPort: 8081
+        env:
+        - name: SPRING_DATASOURCE_URL
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: postgres-url
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: postgres-username
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: postgres-password
+        - name: SPRING_DATA_REDIS_HOST
+          value: "smart-city-redis.redis.cache.windows.net"
+        - name: SPRING_DATA_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: redis-password
+        - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+          value: "smart-city-kafka:9092"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8081
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 5
+
+---
+# ===================================================
+# Kubernetes Service - Backend
+# ===================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: smart-city-backend-service
+  namespace: smart-city
+spec:
+  type: LoadBalancer
+  selector:
+    app: smart-city-backend
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8081
+
+---
+# ===================================================
+# Horizontal Pod Autoscaler
+# ===================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: smart-city-backend-hpa
+  namespace: smart-city
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: smart-city-backend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# ===================================================
+# ConfigMap - Application Configuration
+# ===================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smart-city-config
+  namespace: smart-city
+data:
+  application.properties: |
+    spring.application.name=smart-city-ims
+    server.port=8081
+    management.endpoints.web.exposure.include=health,info,metrics,prometheus
+    logging.level.root=INFO
+
+---
+# ===================================================
+# Secret - Database Credentials
+# ===================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: smart-city
+type: Opaque
+stringData:
+  postgres-url: jdbc:postgresql://smartcity-postgres.postgres.database.azure.com:5432/smartcity
+  postgres-username: smartcity_user@smartcity-postgres
+  postgres-password: SmartCity2024!
+
+---
+# ===================================================
+# Secret - Redis Credentials
+# ===================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-credentials
+  namespace: smart-city
+type: Opaque
+stringData:
+  redis-password: RedisPass2024!
+
+---
+# ===================================================
+# GitHub Actions CI/CD Pipeline
+# .github/workflows/deploy.yml
+# ===================================================
+name: Smart City IMS - CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AZURE_RESOURCE_GROUP: smart-city-rg
+  AKS_CLUSTER_NAME: smart-city-aks
+  ACR_NAME: smartcityacr
+  NAMESPACE: smart-city
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    
+    - name: Build with Maven
+      run: mvn clean package -DskipTests
+    
+    - name: Run tests
+      run: mvn test
+    
+    - name: Upload test coverage
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./target/site/jacoco/jacoco.xml
+
+  build-docker-image:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Build and push Docker image
+      run: |
+        az acr login --name ${{ env.ACR_NAME }}
+        docker build -t ${{ env.ACR_NAME }}.azurecr.io/smart-city-backend:${{ github.sha }} .
+        docker push ${{ env.ACR_NAME }}.azurecr.io/smart-city-backend:${{ github.sha }}
+        docker tag ${{ env.ACR_NAME }}.azurecr.io/smart-city-backend:${{ github.sha }} \
+                   ${{ env.ACR_NAME }}.azurecr.io/smart-city-backend:latest
+        docker push ${{ env.ACR_NAME }}.azurecr.io/smart-city-backend:latest
+
+  deploy-to-aks:
+    needs: build-docker-image
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Set AKS context
+      uses: azure/aks-set-context@v3
+      with:
+        resource-group: ${{ env.AZURE_RESOURCE_GROUP }}
+        cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+    
+    - name: Deploy to AKS
+      uses: azure/k8s-deploy@v4
+      with:
+        namespace: ${{ env.NAMESPACE }}
+        manifests: |
+          k8s/deployment.yaml
+          k8s/service.yaml
+          k8s/hpa.yaml
+        images: |
+          ${{ env.ACR_NAME }}.azurecr.io/smart-city-backend:${{ github.sha }}
+    
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/smart-city-backend -n ${{ env.NAMESPACE }}
+        kubectl get pods -n ${{ env.NAMESPACE }}
+
+---
+# ===================================================
+# Dockerfile - Spring Boot Backend
+# ===================================================
+# Build stage
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /app
+COPY pom.xml .
+COPY src ./src
+RUN mvn clean package -DskipTests
+
+# Runtime stage
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+
+# Add non-root user
+RUN addgroup -g 1000 smartcity && \
+    adduser -D -u 1000 -G smartcity smartcity
+
+# Copy jar from build stage
+COPY --from=build /app/target/*.jar app.jar
+
+# Change ownership
+RUN chown -R smartcity:smartcity /app
+
+# Switch to non-root user
+USER smartcity
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+  CMD wget --quiet --tries=1 --spider http://localhost:8081/actuator/health || exit 1
+
+EXPOSE 8081
+
+ENTRYPOINT ["java", \
+  "-XX:+UseContainerSupport", \
+  "-XX:MaxRAMPercentage=75.0", \
+  "-Djava.security.egd=file:/dev/./urandom", \
+  "-jar", "app.jar"]
+
+---
+# ===================================================
+# Azure Infrastructure as Code (Bicep)
+# main.bicep
+# ===================================================
+/*
+param location string = 'westeurope'
+param environmentName string = 'prod'
+
+// Resource Group
+resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
+  name: 'smart-city-rg'
+  location: location
+}
+
+// PostgreSQL Flexible Server
+resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2022-12-01' = {
+  name: 'smartcity-postgres'
+  location: location
+  sku: {
+    name: 'Standard_D2s_v3'
+    tier: 'GeneralPurpose'
+  }
+  properties: {
+    version: '15'
+    administratorLogin: 'smartcity_admin'
+    administratorLoginPassword: 'SecurePassword123!'
+    storage: {
+      storageSizeGB: 128
+    }
+    backup: {
+      backupRetentionDays: 7
+      geoRedundantBackup: 'Enabled'
+    }
+  }
+}
+
+// Azure Cache for Redis
+resource redisCache 'Microsoft.Cache/redis@2023-04-01' = {
+  name: 'smart-city-redis'
+  location: location
+  properties: {
+    sku: {
+      name: 'Premium'
+      family: 'P'
+      capacity: 1
+    }
+    enableNonSslPort: false
+    minimumTlsVersion: '1.2'
+    redisConfiguration: {
+      'maxmemory-policy': 'allkeys-lru'
+    }
+  }
+}
+
+// Azure Kubernetes Service
+resource aks 'Microsoft.ContainerService/managedClusters@2023-05-01' = {
+  name: 'smart-city-aks'
+  location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    dnsPrefix: 'smartcity'
+    kubernetesVersion: '1.27.3'
+    agentPoolProfiles: [
+      {
+        name: 'default'
+        count: 3
+        vmSize: 'Standard_D4s_v3'
+        mode: 'System'
+        enableAutoScaling: true
+        minCount: 3
+        maxCount: 10
+      }
+    ]
+    networkProfile: {
+      networkPlugin: 'azure'
+      serviceCidr: '10.0.0.0/16'
+      dnsServiceIP: '10.0.0.10'
+    }
+  }
+}
+
+// Container Registry
+resource acr 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' = {
+  name: 'smartcityacr'
+  location: location
+  sku: {
+    name: 'Premium'
+  }
+  properties: {
+    adminUserEnabled: true
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+// Application Insights
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: 'smart-city-insights'
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    RetentionInDays: 90
+  }
+}
+
+output postgresHost string = postgresServer.properties.fullyQualifiedDomainName
+output redisHost string = redisCache.properties.hostName
+output acrLoginServer string = acr.properties.loginServer
+output appInsightsKey string = appInsights.properties.InstrumentationKey
+*/

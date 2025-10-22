@@ -1,0 +1,400 @@
+5)Τώρα ας δημιουργήσουμε το Blockchain integration layer με Web3.py:
+---
+"""
+Smart City Blockchain Integration
+Καταγραφή κρίσιμων δεδομένων σε Ethereum blockchain
+"""
+
+import hashlib
+import json
+import logging
+from datetime import datetime
+from web3 import Web3
+from eth_account import Account
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from typing import Dict, Optional
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class BlockchainIntegrityLayer:
+    """Διαχείριση blockchain καταγραφών για data integrity"""
+    
+    def __init__(self, 
+                 rpc_url="http://localhost:8545",  # Ganache/Hardhat local
+                 private_key=None,
+                 contract_address=None,
+                 postgres_config=None):
+        
+        self.w3 = Web3(Web3.HTTPProvider(rpc_url))
+        self.private_key = private_key or self._generate_account()
+        self.account = Account.from_key(self.private_key)
+        self.contract_address = contract_address
+        
+        # PostgreSQL connection
+        self.pg_config = postgres_config or {
+            'host': 'localhost',
+            'port': 5432,
+            'database': 'smartcity',
+            'user': 'smartcity_user',
+            'password': 'SmartCity2024!'
+        }
+        
+        self._check_connection()
+    
+    def _generate_account(self):
+        """Δημιουργία Ethereum account για testing"""
+        account = Account.create()
+        logger.info(f"Δημιουργήθηκε νέο account: {account.address}")
+        return account.key.hex()
+    
+    def _check_connection(self):
+        """Έλεγχος σύνδεσης με blockchain"""
+        if self.w3.is_connected():
+            logger.info(f"Σύνδεση με blockchain: {self.w3.eth.chain_id}")
+            logger.info(f"Account address: {self.account.address}")
+            balance = self.w3.eth.get_balance(self.account.address)
+            logger.info(f"Balance: {self.w3.from_wei(balance, 'ether')} ETH")
+        else:
+            logger.error("Αποτυχία σύνδεσης με blockchain")
+            raise ConnectionError("Cannot connect to blockchain network")
+    
+    def calculate_data_hash(self, data: Dict) -> str:
+        """Υπολογισμός SHA-256 hash των δεδομένων"""
+        # Ταξινόμηση keys για συνέπεια
+        sorted_data = json.dumps(data, sort_keys=True)
+        hash_object = hashlib.sha256(sorted_data.encode())
+        return f"0x{hash_object.hexdigest()}"
+    
+    def create_transaction(self, data_hash: str, metadata: Dict) -> str:
+        """Δημιουργία transaction για καταγραφή hash"""
+        
+        try:
+            # Get current nonce
+            nonce = self.w3.eth.get_transaction_count(self.account.address)
+            
+            # Prepare transaction
+            transaction = {
+                'nonce': nonce,
+                'to': self.account.address,  # Self-transaction για data storage
+                'value': 0,
+                'gas': 21000,
+                'gasPrice': self.w3.eth.gas_price,
+                'data': data_hash.encode(),  # Store hash in transaction data
+                'chainId': self.w3.eth.chain_id
+            }
+            
+            # Sign transaction
+            signed_txn = self.w3.eth.account.sign_transaction(
+                transaction, 
+                self.private_key
+            )
+            
+            # Send transaction
+            tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+            tx_hash_hex = tx_hash.hex()
+            
+            logger.info(f"Transaction sent: {tx_hash_hex}")
+            
+            # Wait for receipt
+            tx_receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+            
+            logger.info(f"Transaction confirmed in block: {tx_receipt['blockNumber']}")
+            
+            return tx_hash_hex, tx_receipt
+            
+        except Exception as e:
+            logger.error(f"Transaction failed: {e}")
+            raise
+    
+    def record_sensor_reading(self, reading_data: Dict) -> Optional[str]:
+        """Καταγραφή sensor reading στο blockchain"""
+        
+        try:
+            # Calculate hash
+            data_hash = self.calculate_data_hash(reading_data)
+            
+            # Create metadata
+            metadata = {
+                'sensor_id': reading_data.get('sensor_id'),
+                'timestamp': reading_data.get('timestamp'),
+                'sensor_type': reading_data.get('sensor_type'),
+                'value': reading_data.get('value')
+            }
+            
+            # Create and send transaction
+            tx_hash, receipt = self.create_transaction(data_hash, metadata)
+            
+            # Store reference in PostgreSQL
+            self._store_blockchain_record(
+                transaction_hash=tx_hash,
+                block_number=receipt['blockNumber'],
+                sensor_id=reading_data.get('sensor_id'),
+                data_hash=data_hash,
+                gas_used=receipt['gasUsed'],
+                metadata=metadata
+            )
+            
+            return tx_hash
+            
+        except Exception as e:
+            logger.error(f"Failed to record reading: {e}")
+            return None
+    
+    def _store_blockchain_record(self, 
+                                  transaction_hash: str,
+                                  block_number: int,
+                                  sensor_id: str,
+                                  data_hash: str,
+                                  gas_used: int,
+                                  metadata: Dict):
+        """Αποθήκευση blockchain record στο PostgreSQL"""
+        
+        try:
+            conn = psycopg2.connect(**self.pg_config)
+            cursor = conn.cursor()
+            
+            query = """
+                INSERT INTO blockchain_records 
+                (transaction_hash, block_number, sensor_id, data_hash, 
+                 timestamp, gas_used, metadata, verified)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            cursor.execute(query, (
+                transaction_hash,
+                block_number,
+                sensor_id,
+                data_hash,
+                datetime.utcnow(),
+                gas_used,
+                json.dumps(metadata),
+                True
+            ))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            logger.info(f"Blockchain record stored: {transaction_hash}")
+            
+        except Exception as e:
+            logger.error(f"Database storage failed: {e}")
+            raise
+    
+    def verify_data_integrity(self, 
+                              reading_data: Dict, 
+                              transaction_hash: str) -> bool:
+        """Επαλήθευση ακεραιότητας δεδομένων"""
+        
+        try:
+            # Get transaction from blockchain
+            tx = self.w3.eth.get_transaction(transaction_hash)
+            
+            if not tx:
+                logger.error("Transaction not found")
+                return False
+            
+            # Calculate current hash
+            current_hash = self.calculate_data_hash(reading_data)
+            
+            # Extract stored hash from transaction data
+            stored_hash = tx['input'].hex()
+            
+            # Compare hashes
+            is_valid = current_hash == stored_hash
+            
+            if is_valid:
+                logger.info(f"Data integrity verified for tx: {transaction_hash}")
+            else:
+                logger.warning(f"Data integrity check FAILED for tx: {transaction_hash}")
+            
+            return is_valid
+            
+        except Exception as e:
+            logger.error(f"Verification failed: {e}")
+            return False
+    
+    def get_blockchain_records(self, 
+                               sensor_id: Optional[str] = None,
+                               limit: int = 100) -> list:
+        """Ανάκτηση blockchain records από PostgreSQL"""
+        
+        try:
+            conn = psycopg2.connect(**self.pg_config)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            
+            if sensor_id:
+                query = """
+                    SELECT * FROM blockchain_records 
+                    WHERE sensor_id = %s 
+                    ORDER BY timestamp DESC 
+                    LIMIT %s
+                """
+                cursor.execute(query, (sensor_id, limit))
+            else:
+                query = """
+                    SELECT * FROM blockchain_records 
+                    ORDER BY timestamp DESC 
+                    LIMIT %s
+                """
+                cursor.execute(query, (limit,))
+            
+            records = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            
+            return records
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve records: {e}")
+            return []
+
+
+class SmartContractManager:
+    """Διαχείριση Smart Contract για advanced blockchain features"""
+    
+    # Simple Smart Contract ABI για data storage
+    CONTRACT_ABI = [
+        {
+            "inputs": [
+                {"internalType": "string", "name": "sensorId", "type": "string"},
+                {"internalType": "bytes32", "name": "dataHash", "type": "bytes32"}
+            ],
+            "name": "recordSensorData",
+            "outputs": [],
+            "stateMutability": "nonpayable",
+            "type": "function"
+        },
+        {
+            "inputs": [{"internalType": "string", "name": "sensorId", "type": "string"}],
+            "name": "getLatestHash",
+            "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]
+    
+    # Solidity source code
+    CONTRACT_SOURCE = """
+    // SPDX-License-Identifier: MIT
+    pragma solidity ^0.8.0;
+    
+    contract SensorDataRegistry {
+        struct SensorRecord {
+            string sensorId;
+            bytes32 dataHash;
+            uint256 timestamp;
+            address recorder;
+        }
+        
+        mapping(string => SensorRecord[]) public sensorRecords;
+        
+        event DataRecorded(
+            string indexed sensorId,
+            bytes32 dataHash,
+            uint256 timestamp,
+            address recorder
+        );
+        
+        function recordSensorData(string memory sensorId, bytes32 dataHash) public {
+            SensorRecord memory newRecord = SensorRecord({
+                sensorId: sensorId,
+                dataHash: dataHash,
+                timestamp: block.timestamp,
+                recorder: msg.sender
+            });
+            
+            sensorRecords[sensorId].push(newRecord);
+            
+            emit DataRecorded(sensorId, dataHash, block.timestamp, msg.sender);
+        }
+        
+        function getLatestHash(string memory sensorId) public view returns (bytes32) {
+            require(sensorRecords[sensorId].length > 0, "No records found");
+            uint256 lastIndex = sensorRecords[sensorId].length - 1;
+            return sensorRecords[sensorId][lastIndex].dataHash;
+        }
+        
+        function getRecordCount(string memory sensorId) public view returns (uint256) {
+            return sensorRecords[sensorId].length;
+        }
+    }
+    """
+    
+    def __init__(self, w3: Web3, contract_address: str, account: Account):
+        self.w3 = w3
+        self.account = account
+        self.contract = w3.eth.contract(
+            address=contract_address,
+            abi=self.CONTRACT_ABI
+        )
+    
+    def record_data(self, sensor_id: str, data_hash: str) -> str:
+        """Καταγραφή δεδομένων μέσω smart contract"""
+        
+        # Convert hash to bytes32
+        hash_bytes = bytes.fromhex(data_hash[2:])  # Remove '0x'
+        
+        # Build transaction
+        txn = self.contract.functions.recordSensorData(
+            sensor_id,
+            hash_bytes
+        ).build_transaction({
+            'from': self.account.address,
+            'nonce': self.w3.eth.get_transaction_count(self.account.address),
+            'gas': 200000,
+            'gasPrice': self.w3.eth.gas_price
+        })
+        
+        # Sign and send
+        signed_txn = self.w3.eth.account.sign_transaction(txn, self.account.key)
+        tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+        
+        # Wait for receipt
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        logger.info(f"Smart contract record created: {tx_hash.hex()}")
+        return tx_hash.hex()
+
+
+def main():
+    """Demo χρήσης blockchain integration"""
+    
+    # Initialize blockchain layer
+    blockchain = BlockchainIntegrityLayer(
+        rpc_url="http://localhost:8545"  # Ganache/Hardhat
+    )
+    
+    # Sample sensor reading
+    reading = {
+        'sensor_id': 'TEMP-001',
+        'timestamp': datetime.utcnow().isoformat(),
+        'sensor_type': 'temperature',
+        'value': 25.5,
+        'unit': '°C'
+    }
+    
+    # Record to blockchain
+    logger.info("Recording sensor reading to blockchain...")
+    tx_hash = blockchain.record_sensor_reading(reading)
+    
+    if tx_hash:
+        logger.info(f"✓ Successfully recorded: {tx_hash}")
+        
+        # Verify integrity
+        logger.info("Verifying data integrity...")
+        is_valid = blockchain.verify_data_integrity(reading, tx_hash)
+        logger.info(f"Verification result: {'✓ VALID' if is_valid else '✗ INVALID'}")
+    
+    # Retrieve records
+    logger.info("\nRetrieving blockchain records...")
+    records = blockchain.get_blockchain_records(sensor_id='TEMP-001', limit=10)
+    logger.info(f"Found {len(records)} records")
+
+
+if __name__ == "__main__":
+    main()
+---

@@ -1,0 +1,187 @@
+1)Ας ξεκινήσουμε με το Python script που προσομοιώνει αισθητήρες και στέλνει δεδομένα στο Kafka:
+---
+"""
+Smart City IoT Sensor Simulator
+Προσομοιώνει αισθητήρες περιβάλλοντος και στέλνει δεδομένα στο Kafka
+"""
+
+import json
+import time
+import random
+from datetime import datetime
+from kafka import KafkaProducer
+from kafka.errors import KafkaError
+import logging
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class SensorSimulator:
+    """Προσομοίωση αισθητήρων Smart City"""
+    
+    def __init__(self, sensor_id, sensor_type, location):
+        self.sensor_id = sensor_id
+        self.sensor_type = sensor_type
+        self.location = location
+        self.base_values = self._initialize_base_values()
+    
+    def _initialize_base_values(self):
+        """Αρχικοποίηση βασικών τιμών ανά τύπο αισθητήρα"""
+        base_configs = {
+            'temperature': {'base': 22.0, 'variance': 5.0, 'unit': '°C'},
+            'humidity': {'base': 60.0, 'variance': 15.0, 'unit': '%'},
+            'air_quality': {'base': 50.0, 'variance': 30.0, 'unit': 'AQI'},
+            'noise': {'base': 55.0, 'variance': 20.0, 'unit': 'dB'},
+            'pm25': {'base': 15.0, 'variance': 10.0, 'unit': 'μg/m³'},
+            'pm10': {'base': 25.0, 'variance': 15.0, 'unit': 'μg/m³'},
+            'co2': {'base': 400.0, 'variance': 100.0, 'unit': 'ppm'}
+        }
+        return base_configs.get(self.sensor_type, 
+                                {'base': 50.0, 'variance': 10.0, 'unit': 'units'})
+    
+    def generate_reading(self):
+        """Δημιουργία προσομοιωμένης μέτρησης"""
+        # Προσθήκη ρεαλιστικής διακύμανσης με τάση
+        trend = random.uniform(-0.5, 0.5)
+        noise = random.gauss(0, self.base_values['variance'] / 3)
+        value = self.base_values['base'] + trend + noise
+        
+        # Εξασφάλιση θετικών τιμών
+        value = max(0, value)
+        
+        # Ανίχνευση ανωμαλίας (5% πιθανότητα)
+        is_anomaly = random.random() < 0.05
+        if is_anomaly:
+            value *= random.uniform(1.5, 2.5)
+        
+        reading = {
+            'sensor_id': self.sensor_id,
+            'sensor_type': self.sensor_type,
+            'timestamp': datetime.utcnow().isoformat(),
+            'location': self.location,
+            'value': round(value, 2),
+            'unit': self.base_values['unit'],
+            'is_anomaly': is_anomaly,
+            'status': 'active'
+        }
+        
+        return reading
+
+
+class KafkaIoTProducer:
+    """Kafka Producer για IoT δεδομένα"""
+    
+    def __init__(self, bootstrap_servers='localhost:9092', topic='smart-city-sensors'):
+        self.topic = topic
+        self.producer = None
+        self.bootstrap_servers = bootstrap_servers
+        self._connect()
+    
+    def _connect(self):
+        """Σύνδεση στο Kafka cluster"""
+        try:
+            self.producer = KafkaProducer(
+                bootstrap_servers=self.bootstrap_servers,
+                value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+                key_serializer=lambda k: k.encode('utf-8') if k else None,
+                acks='all',  # Εξασφάλιση παράδοσης
+                retries=3,
+                max_in_flight_requests_per_connection=1,  # Διατήρηση σειράς
+                compression_type='gzip'
+            )
+            logger.info(f"Σύνδεση στο Kafka: {self.bootstrap_servers}")
+        except KafkaError as e:
+            logger.error(f"Αποτυχία σύνδεσης στο Kafka: {e}")
+            raise
+    
+    def send_reading(self, reading):
+        """Αποστολή μέτρησης στο Kafka"""
+        try:
+            # Χρήση sensor_id ως key για partitioning
+            future = self.producer.send(
+                self.topic,
+                key=reading['sensor_id'],
+                value=reading
+            )
+            
+            # Callback για επιβεβαίωση
+            record_metadata = future.get(timeout=10)
+            logger.info(
+                f"Μήνυμα στάλθηκε: {reading['sensor_id']} -> "
+                f"partition {record_metadata.partition}, "
+                f"offset {record_metadata.offset}"
+            )
+            return True
+            
+        except KafkaError as e:
+            logger.error(f"Αποτυχία αποστολής: {e}")
+            return False
+    
+    def close(self):
+        """Κλείσιμο producer"""
+        if self.producer:
+            self.producer.flush()
+            self.producer.close()
+            logger.info("Kafka producer κλείσιμο")
+
+
+def main():
+    """Κύρια λειτουργία προσομοίωσης"""
+    
+    # Δημιουργία αισθητήρων για διάφορες τοποθεσίες
+    sensors = [
+        SensorSimulator('TEMP-001', 'temperature', {'lat': 40.6401, 'lon': 22.9444, 'city': 'Thessaloniki'}),
+        SensorSimulator('AQI-001', 'air_quality', {'lat': 40.6401, 'lon': 22.9444, 'city': 'Thessaloniki'}),
+        SensorSimulator('PM25-001', 'pm25', {'lat': 40.6401, 'lon': 22.9444, 'city': 'Thessaloniki'}),
+        SensorSimulator('PM10-001', 'pm10', {'lat': 40.6401, 'lon': 22.9444, 'city': 'Thessaloniki'}),
+        SensorSimulator('NOISE-001', 'noise', {'lat': 40.6401, 'lon': 22.9444, 'city': 'Thessaloniki'}),
+        SensorSimulator('CO2-001', 'co2', {'lat': 40.6401, 'lon': 22.9444, 'city': 'Thessaloniki'}),
+        SensorSimulator('HUM-001', 'humidity', {'lat': 40.6401, 'lon': 22.9444, 'city': 'Thessaloniki'}),
+    ]
+    
+    # Αρχικοποίηση Kafka producer
+    try:
+        producer = KafkaIoTProducer(
+            bootstrap_servers='localhost:9092',
+            topic='smart-city-sensors'
+        )
+        
+        logger.info("Έναρξη προσομοίωσης IoT αισθητήρων...")
+        logger.info(f"Αριθμός αισθητήρων: {len(sensors)}")
+        
+        # Συνεχής προσομοίωση
+        iteration = 0
+        while True:
+            iteration += 1
+            logger.info(f"\n--- Επανάληψη {iteration} ---")
+            
+            for sensor in sensors:
+                reading = sensor.generate_reading()
+                success = producer.send_reading(reading)
+                
+                if success:
+                    status = "⚠️ ΑΝΩΜΑΛΙΑ" if reading['is_anomaly'] else "✓"
+                    logger.info(
+                        f"{status} {reading['sensor_type']}: "
+                        f"{reading['value']} {reading['unit']}"
+                    )
+            
+            # Αναμονή πριν την επόμενη ανάγνωση (π.χ. κάθε 5 δευτερόλεπτα)
+            time.sleep(5)
+            
+    except KeyboardInterrupt:
+        logger.info("\nΔιακοπή προσομοίωσης από χρήστη")
+    except Exception as e:
+        logger.error(f"Σφάλμα: {e}")
+    finally:
+        producer.close()
+
+
+if __name__ == "__main__":
+    main()
+---
